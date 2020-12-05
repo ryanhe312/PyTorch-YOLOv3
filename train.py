@@ -39,9 +39,11 @@ if __name__ == "__main__":
     opt = parser.parse_args()
     print(opt)
 
-    logger = Logger("logs")
+    model_name = os.path.basename(opt.model_def)
+    logger = Logger(os.path.join("logs",model_name))
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    torch.cuda.manual_seed(1) if torch.cuda.is_available() else torch.manual_seed(1)
 
     os.makedirs("output", exist_ok=True)
     os.makedirs("checkpoints", exist_ok=True)
@@ -175,4 +177,4 @@ if __name__ == "__main__":
             print(f"---- mAP {AP.mean()}")
 
         if epoch % opt.checkpoint_interval == 0:
-            torch.save(model.state_dict(), f"checkpoints/yolov3_ckpt_%d.pth" % epoch)
+            torch.save(model.state_dict(), f"checkpoints/%s_ckpt_%d.pth" % (model_name, epoch))

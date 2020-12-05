@@ -200,6 +200,9 @@ class YOLOLayer(nn.Module):
             )
 
             # Loss : Mask outputs to ignore non-existing objects (except with conf. loss)
+            # Fix UserWarning: indexing with dtype torch.uint8 is now deprecated, please use a dtype torch.bool instead.
+            obj_mask = obj_mask.bool() 
+            noobj_mask = noobj_mask.bool()
             loss_x = self.mse_loss(x[obj_mask], tx[obj_mask])
             loss_y = self.mse_loss(y[obj_mask], ty[obj_mask])
             loss_w = self.mse_loss(w[obj_mask], tw[obj_mask])
@@ -245,7 +248,7 @@ class YOLORLayer(nn.Module):
     """Detection layer"""
 
     def __init__(self, anchors, num_classes, img_dim=416):
-        super(YOLOLayer, self).__init__()
+        super(YOLORLayer, self).__init__()
         self.anchors = anchors
         self.num_anchors = len(anchors)
         self.num_classes = num_classes
@@ -270,7 +273,6 @@ class YOLORLayer(nn.Module):
         self.scaled_anchors = FloatTensor([(a_w / self.stride, a_h / self.stride) for a_w, a_h in self.anchors])
         self.anchor_w = self.scaled_anchors[:, 0:1].view((1, self.num_anchors, 1, 1))
         self.anchor_h = self.scaled_anchors[:, 1:2].view((1, self.num_anchors, 1, 1))
-        self.anchor_d = torch.sqrt(torch.square(self.anchor_w)+torch.square(self.anchor_h))
 
     def forward(self, x, targets=None, img_dim=None):
 
@@ -284,7 +286,7 @@ class YOLORLayer(nn.Module):
         grid_size = x.size(2)
 
         prediction = (
-            x.view(num_samples, self.num_anchors, self.num_classes + 6, grid_size, grid_size)
+            x.view(num_samples, self.num_anchors, self.num_classes + 5, grid_size, grid_size)
             .permute(0, 1, 3, 4, 2)
             .contiguous()
         )
@@ -294,8 +296,10 @@ class YOLORLayer(nn.Module):
         y = torch.sigmoid(prediction[..., 1])  # Center y
         d = prediction[..., 2]  # Diameter
         r = prediction[..., 3]  # Theta
-        pred_conf = torch.sigmoid(prediction[..., 5])  # Conf
-        pred_cls = torch.sigmoid(prediction[..., 6:])  # Cls pred.
+        w = torch.exp(d.data) * torch.abs(torch.cos(r.data * 2 * self.pi))
+        h = torch.exp(d.data) * torch.abs(torch.sin(r.data * 2 * self.pi))
+        pred_conf = torch.sigmoid(prediction[..., 4])  # Conf
+        pred_cls = torch.sigmoid(prediction[..., 5:])  # Cls pred.
 
         # If grid size does not match current we compute new offsets
         if grid_size != self.grid_size:
@@ -305,8 +309,8 @@ class YOLORLayer(nn.Module):
         pred_boxes = FloatTensor(prediction[..., :4].shape)
         pred_boxes[..., 0] = x.data + self.grid_x
         pred_boxes[..., 1] = y.data + self.grid_y
-        pred_boxes[..., 2] = torch.exp(d.data) * self.anchor_d * torch.abs(torch.cos(r.data * 2 * self.pi))
-        pred_boxes[..., 3] = torch.exp(d.data) * self.anchor_d * torch.abs(torch.sin(r.data * 2 * self.pi))
+        pred_boxes[..., 2] = w.data * self.anchor_w
+        pred_boxes[..., 3] = h.data * self.anchor_h
 
         output = torch.cat(
             (
@@ -329,10 +333,13 @@ class YOLORLayer(nn.Module):
             )
 
             # Loss : Mask outputs to ignore non-existing objects (except with conf. loss)
+            # Fix UserWarning: indexing with dtype torch.uint8 is now deprecated, please use a dtype torch.bool instead.
+            obj_mask = obj_mask.bool() 
+            noobj_mask = noobj_mask.bool()
             loss_x = self.mse_loss(x[obj_mask], tx[obj_mask])
             loss_y = self.mse_loss(y[obj_mask], ty[obj_mask])
-            loss_w = self.mse_loss(w[obj_mask], tw[obj_mask])
-            loss_h = self.mse_loss(h[obj_mask], th[obj_mask])
+            loss_w = self.mse_loss(torch.log(w[obj_mask] + 1e-16), tw[obj_mask])
+            loss_h = self.mse_loss(torch.log(h[obj_mask] + 1e-16), th[obj_mask])
             loss_conf_obj = self.bce_loss(pred_conf[obj_mask], tconf[obj_mask])
             loss_conf_noobj = self.bce_loss(pred_conf[noobj_mask], tconf[noobj_mask])
             loss_conf = self.obj_scale * loss_conf_obj + self.noobj_scale * loss_conf_noobj
@@ -396,6 +403,10 @@ class Darknet(nn.Module):
                 layer_i = int(module_def["from"])
                 x = layer_outputs[-1] + layer_outputs[layer_i]
             elif module_def["type"] == "yolo":
+                x, layer_loss = module[0](x, targets, img_dim)
+                loss += layer_loss
+                yolo_outputs.append(x)
+            elif module_def["type"] == "yolor":
                 x, layer_loss = module[0](x, targets, img_dim)
                 loss += layer_loss
                 yolo_outputs.append(x)

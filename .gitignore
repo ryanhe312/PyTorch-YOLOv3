@@ -11,5 +11,6 @@ config/bottle.data
 config/yolov3-custom.cfg
 backup
 weights/
+logs/
 __pycache__
 checkpoints
