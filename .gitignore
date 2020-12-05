@@ -6,7 +6,10 @@ build
 dist
 output
 data/coco
+data/bottle
+config/bottle.data
+config/yolov3-custom.cfg
 backup
-weights/*.weights
+weights/
 __pycache__
 checkpoints
