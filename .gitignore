@@ -5,10 +5,8 @@ build
 *.egg-info
 dist
 output
-data/coco
-data/bottle
-config/bottle.data
-config/yolov3-custom.cfg
+data/
+config/
 backup
 weights/
 logs/

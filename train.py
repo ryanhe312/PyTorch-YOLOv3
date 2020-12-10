@@ -46,7 +46,7 @@ if __name__ == "__main__":
     torch.cuda.manual_seed(1) if torch.cuda.is_available() else torch.manual_seed(1)
 
     os.makedirs("output", exist_ok=True)
-    os.makedirs("checkpoints", exist_ok=True)
+    os.makedirs("checkpoints/%s"%(model_name), exist_ok=True)
 
     # Get data configuration
     data_config = parse_data_config(opt.data_config)
@@ -55,7 +55,7 @@ if __name__ == "__main__":
     class_names = load_classes(data_config["names"])
 
     # Initiate model
-    model = Darknet(opt.model_def,opt.img_size).to(device)
+    model = Darknet(opt.model_def, img_size=opt.img_size).to(device)
     model.apply(weights_init_normal)
 
     # If specified we start from checkpoint
@@ -66,7 +66,7 @@ if __name__ == "__main__":
             model.load_darknet_weights(opt.pretrained_weights)
 
     # Get dataloader
-    dataset = ListDataset(train_path, augment=True, multiscale=opt.multiscale_training)
+    dataset = ListDataset(train_path, img_size=opt.img_size, augment=True, multiscale=opt.multiscale_training)
     dataloader = torch.utils.data.DataLoader(
         dataset,
         batch_size=opt.batch_size,
@@ -177,4 +177,4 @@ if __name__ == "__main__":
             print(f"---- mAP {AP.mean()}")
 
         if epoch % opt.checkpoint_interval == 0:
-            torch.save(model.state_dict(), f"checkpoints/%s_ckpt_%d.pth" % (model_name, epoch))
+            torch.save(model.state_dict(), f"checkpoints/%s/%s_ckpt_%d.pth" % (model_name,model_name, epoch))
