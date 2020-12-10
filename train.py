@@ -43,7 +43,7 @@ if __name__ == "__main__":
     logger = Logger(os.path.join("logs",model_name))
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    torch.cuda.manual_seed(1) if torch.cuda.is_available() else torch.manual_seed(1)
+    torch.cuda.manual_seed(19) if torch.cuda.is_available() else torch.manual_seed(19)
 
     os.makedirs("output", exist_ok=True)
     os.makedirs("checkpoints/%s"%(model_name), exist_ok=True)

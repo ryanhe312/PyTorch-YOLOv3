@@ -7,7 +7,7 @@ from torch.autograd import Variable
 import numpy as np
 
 from utils.parse_config import *
-from utils.utils import build_targets, to_cpu, non_max_suppression
+from utils.utils import *
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
@@ -255,12 +255,12 @@ class YOLORLayer(nn.Module):
         self.ignore_thres = 0.5
         self.mse_loss = nn.MSELoss()
         self.bce_loss = nn.BCELoss()
+        self.mae_loss = nn.L1Loss()
         self.obj_scale = 1
         self.noobj_scale = 100
         self.metrics = {}
         self.img_dim = img_dim
         self.grid_size = 0  # grid size
-        self.pi = torch.acos(torch.zeros(1)).item() * 2
 
     def compute_grid_offsets(self, grid_size, cuda=True):
         self.grid_size = grid_size
@@ -273,6 +273,7 @@ class YOLORLayer(nn.Module):
         self.scaled_anchors = FloatTensor([(a_w / self.stride, a_h / self.stride) for a_w, a_h in self.anchors])
         self.anchor_w = self.scaled_anchors[:, 0:1].view((1, self.num_anchors, 1, 1))
         self.anchor_h = self.scaled_anchors[:, 1:2].view((1, self.num_anchors, 1, 1))
+        self.anchor_d = torch.sqrt(torch.square(self.anchor_w)+torch.square(self.anchor_h))
 
     def forward(self, x, targets=None, img_dim=None):
 
@@ -296,8 +297,6 @@ class YOLORLayer(nn.Module):
         y = torch.sigmoid(prediction[..., 1])  # Center y
         d = prediction[..., 2]  # Diameter
         r = prediction[..., 3]  # Theta
-        w = torch.exp(d.data) * torch.abs(torch.cos(r.data * 2 * self.pi))
-        h = torch.exp(d.data) * torch.abs(torch.sin(r.data * 2 * self.pi))
         pred_conf = torch.sigmoid(prediction[..., 4])  # Conf
         pred_cls = torch.sigmoid(prediction[..., 5:])  # Cls pred.
 
@@ -309,8 +308,8 @@ class YOLORLayer(nn.Module):
         pred_boxes = FloatTensor(prediction[..., :4].shape)
         pred_boxes[..., 0] = x.data + self.grid_x
         pred_boxes[..., 1] = y.data + self.grid_y
-        pred_boxes[..., 2] = w.data * self.anchor_w
-        pred_boxes[..., 3] = h.data * self.anchor_h
+        pred_boxes[..., 2] = torch.exp(d.data) * self.anchor_d * torch.cos(torch.clamp(r.data,0.01,0.99) * 0.5 * pi)
+        pred_boxes[..., 3] = torch.exp(d.data) * self.anchor_d * torch.sin(torch.clamp(r.data,0.01,0.99) * 0.5 * pi)
 
         output = torch.cat(
             (
@@ -324,7 +323,7 @@ class YOLORLayer(nn.Module):
         if targets is None:
             return output, 0
         else:
-            iou_scores, class_mask, obj_mask, noobj_mask, tx, ty, tw, th, tcls, tconf = build_targets(
+            iou_scores, class_mask, obj_mask, noobj_mask, tx, ty, td, tr, tcls, tconf = build_rtargets(
                 pred_boxes=pred_boxes,
                 pred_cls=pred_cls,
                 target=targets,
@@ -338,13 +337,13 @@ class YOLORLayer(nn.Module):
             noobj_mask = noobj_mask.bool()
             loss_x = self.mse_loss(x[obj_mask], tx[obj_mask])
             loss_y = self.mse_loss(y[obj_mask], ty[obj_mask])
-            loss_w = self.mse_loss(torch.log(w[obj_mask] + 1e-16), tw[obj_mask])
-            loss_h = self.mse_loss(torch.log(h[obj_mask] + 1e-16), th[obj_mask])
+            loss_d = self.mse_loss(d[obj_mask], td[obj_mask])
+            loss_r = self.mae_loss(r[obj_mask], tr[obj_mask])
             loss_conf_obj = self.bce_loss(pred_conf[obj_mask], tconf[obj_mask])
             loss_conf_noobj = self.bce_loss(pred_conf[noobj_mask], tconf[noobj_mask])
             loss_conf = self.obj_scale * loss_conf_obj + self.noobj_scale * loss_conf_noobj
             loss_cls = self.bce_loss(pred_cls[obj_mask], tcls[obj_mask])
-            total_loss = loss_x + loss_y + loss_w + loss_h + loss_conf + loss_cls
+            total_loss = loss_x + loss_y + loss_d + loss_r + loss_conf + loss_cls
 
             # Metrics
             cls_acc = 100 * class_mask[obj_mask].mean()
@@ -362,8 +361,8 @@ class YOLORLayer(nn.Module):
                 "loss": to_cpu(total_loss).item(),
                 "x": to_cpu(loss_x).item(),
                 "y": to_cpu(loss_y).item(),
-                "w": to_cpu(loss_w).item(),
-                "h": to_cpu(loss_h).item(),
+                "w": to_cpu(loss_d).item(),
+                "h": to_cpu(loss_r).item(),
                 "conf": to_cpu(loss_conf).item(),
                 "cls": to_cpu(loss_cls).item(),
                 "cls_acc": to_cpu(cls_acc).item(),
